@@ -1,0 +1,36 @@
+# Core deep learning
+torch>=2.0.0
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Data manipulation
+pandas>=2.0.0
+h5py>=3.8.0
+
+# Molecular dynamics and chemistry
+MDAnalysis>=2.8.0
+rdkit>=2023.9.1
+biopython>=1.81
+gemmi>=0.6.0
+
+# Machine learning utilities
+scikit-learn>=1.3.0
+torchinfo>=1.8.0
+
+# Visualization and logging
+tensorboard>=2.12.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+tqdm>=4.65.0
+
+# Utilities
+einops>=0.6.0
+typing-extensions>=4.5.0
+click>=8.0.0
+pyyaml>=6.0.0
+
+# Optional: For ATOM3D datasets
+atom3d>=0.2.6
+
+# Optional: For distributed training monitoring
+ray>=2.5.0

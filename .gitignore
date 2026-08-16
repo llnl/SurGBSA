@@ -1,0 +1,6 @@
+ sur_gbsa/notebooks/pdbs
+*.csv
+sur_gbsa/splits/atom3d_lba_30/
+sur_gbsa/splits/atom3d_lba_60
+**/*pycache*
+CLAUDE.md
