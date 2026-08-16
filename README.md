@@ -3,6 +3,7 @@
 Official implementation of **"SurGBSA: Learning Representations From Molecular Dynamics Simulations"**
 
 [![arXiv](https://img.shields.io/badge/arXiv-2509.03084-b31b1b.svg)](https://arxiv.org/abs/2509.03084)
+[![DOI](https://zenodo.org/badge/1180359891.svg)](https://doi.org/10.5281/zenodo.21961791)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 SurGBSA is a deep learning framework for predicting protein-ligand binding affinities and MM-GBSA scores using E(n)-equivariant graph neural networks (EGNN) trained on molecular dynamics (MD) simulations.
@@ -146,11 +147,12 @@ SurGBSA/
 │   ├── utils.py                  # General utilities (metrics, result loading)
 │   ├── distributed_utils.py      # Distributed training utilities
 │   │
-│   ├── pretrain.py               # Single-GPU pretraining script
-│   ├── pretrain_distributed.py   # Multi-GPU distributed pretraining
-│   ├── finetune_affinity.py      # Finetune for binding affinity/MM-GBSA prediction
+│   ├── pretrain.py               # Single-GPU pretraining script (not used in paper)
+│   ├── pretrain_distributed.py   # Multi-GPU distributed pretraining (main pretraining)
+│   ├── finetune_distributed.py   # Distributed MM-GBSA training for EGMN models
+│   ├── finetune_distributed-egnn.py  # Distributed MM-GBSA training for GNN/EGNN models
+│   ├── finetune_affinity.py      # Finetune for binding affinity prediction
 │   ├── finetune_decoy_pose_ranking.py  # Finetune for CASF-2016 decoy pose ranking
-│   ├── finetune_distributed-egnn.py  # Distributed finetuning for EGNN
 │   ├── test.py                   # Model evaluation script
 │   ├── extract.py                # Extract embeddings from checkpoints
 │   ├── sample.py                 # Sample trajectories from model
@@ -255,22 +257,62 @@ gbsa_scores = np.loadtxt("./data/md/1a30/p0/frames.dat")
 - `p0` = Crystal structure pose
 - `p1-p5` = Docked poses (ranked by docking score)
 
-### 3. Pretraining (Optional)
+### 3. Pretraining
 
-Pre-train a model on MD trajectories with self-supervised tasks:
+Pre-train a model on MD trajectories with self-supervised tasks using distributed training:
 
 ```bash
-python sur_gbsa/pretrain.py \
+# Set environment variables for distributed training
+export MASTER_ADDR=localhost
+export MASTER_PORT=29500
+
+# Run distributed pretraining (used in paper)
+python -m torch.distributed.launch --nproc_per_node=4 \
+  sur_gbsa/pretrain_distributed.py \
   --dataset md-dock_top_5+crystal \
   --data_path ./data/md \
   --split_path ./data/splits \
-  --batch_size 128 \
+  --batch_size 256 \
   --lr 1e-4 \
   --epochs 100 \
   --pretrain_tasks order,rmsd,pose
 ```
 
-### 4. Fine-tuning
+**Note**: `pretrain.py` (single-GPU version) is provided for convenience but was not used in the paper. Use `pretrain_distributed.py` for reproducing paper results.
+
+### 4. MM-GBSA Training
+
+Train models for MM-GBSA score prediction (main task in the paper):
+
+**For EGMN models:**
+```bash
+python -m torch.distributed.launch --nproc_per_node=4 \
+  sur_gbsa/finetune_distributed.py \
+  --dataset md-dock_top_5+crystal \
+  --data_path ./data/md \
+  --split_path ./data/splits \
+  --pretrain ./data/weights/best_model-epoch-574.pt \
+  --save_path ./results/mmgbsa_egmn \
+  --batch_size 256 \
+  --lr 1e-4 \
+  --epochs 100
+```
+
+**For GNN/EGNN models:**
+```bash
+python -m torch.distributed.launch --nproc_per_node=4 \
+  sur_gbsa/finetune_distributed-egnn.py \
+  --dataset md-dock_top_5+crystal \
+  --data_path ./data/md \
+  --split_path ./data/splits \
+  --pretrain ./data/weights/best_model-epoch-574.pt \
+  --save_path ./results/mmgbsa_egnn \
+  --batch_size 256 \
+  --lr 1e-4 \
+  --epochs 100
+```
+
+### 5. Fine-tuning for Binding Affinity and Pose Ranking
 
 Fine-tune on binding affinity or pose ranking tasks:
 
@@ -303,7 +345,7 @@ python sur_gbsa/finetune_decoy_pose_ranking.py \
   --epochs 50
 ```
 
-### 5. Inference on Structures
+### 6. Inference on Structures
 
 Run inference using the pre-trained model on MD trajectories or custom structures:
 
@@ -329,7 +371,7 @@ python sur_gbsa/score_mdanalysis.py \
   --output batch_predictions.csv
 ```
 
-### 6. Evaluation
+### 7. Evaluation
 
 Evaluate a trained model on test set:
 
@@ -344,9 +386,55 @@ python sur_gbsa/test.py \
 
 ## Usage Examples
 
+### MM-GBSA Prediction (Main Paper Results)
+
+Train models for MM-GBSA score prediction using distributed training:
+
+**EGMN Model (used in paper):**
+```bash
+# Set environment variables
+export MASTER_ADDR=localhost
+export MASTER_PORT=29500
+
+# Train EGMN for MM-GBSA prediction
+python -m torch.distributed.launch --nproc_per_node=4 \
+  sur_gbsa/finetune_distributed.py \
+  --dataset md-dock_top_5+crystal \
+  --data_path ./data/md \
+  --split_path ./data/splits \
+  --pretrain ./data/weights/best_model-epoch-574.pt \
+  --save_path ./results/mmgbsa_egmn \
+  --batch_size 256 \
+  --lr 1e-4 \
+  --epochs 100 \
+  --seed 0
+```
+
+**GNN/EGNN Models:**
+```bash
+# Train GNN/EGNN for MM-GBSA prediction
+python -m torch.distributed.launch --nproc_per_node=4 \
+  sur_gbsa/finetune_distributed-egnn.py \
+  --dataset md-dock_top_5+crystal \
+  --data_path ./data/md \
+  --split_path ./data/splits \
+  --pretrain ./data/weights/best_model-epoch-574.pt \
+  --save_path ./results/mmgbsa_egnn \
+  --batch_size 256 \
+  --lr 1e-4 \
+  --epochs 100 \
+  --seed 0
+```
+
+**Key Parameters:**
+- `--dataset`: Dataset variant (e.g., `md-crystal`, `md-dock_top_5+crystal`)
+- `--pretrain`: Path to pretrained checkpoint from `pretrain_distributed.py`
+- `--data_path`: Directory containing MD trajectories
+- `--split_path`: Directory containing train/val/test split CSV files
+
 ### Fine-tuning for Binding Affinity Prediction
 
-Fine-tune a model for binding affinity or MM-GBSA prediction using `finetune_affinity.py`:
+Fine-tune a model for binding affinity prediction using `finetune_affinity.py`:
 
 ```bash
 # Fine-tune from pretrained checkpoint
@@ -418,25 +506,20 @@ python sur_gbsa/finetune_decoy_pose_ranking.py \
 - Success rate (Top-1): % of complexes where best-scored pose has RMSD ≤ 2.0 Å
 - Mean Spearman correlation: Average correlation between predicted scores and true RMSDs
 
-### Distributed Training (Multi-GPU)
+### Distributed Training Notes
 
-For multi-GPU training using PyTorch DDP with the downloaded data:
+All main training scripts (`pretrain_distributed.py`, `finetune_distributed.py`, `finetune_distributed-egnn.py`) use PyTorch DDP for multi-GPU training:
 
 ```bash
-# Set environment variables
-export MASTER_ADDR=localhost
-export MASTER_PORT=29500
+# Set required environment variables
+export MASTER_ADDR=localhost  # or hostname of rank 0 node
+export MASTER_PORT=29500      # any available port
 
-# Launch distributed training (4 GPUs)
-python -m torch.distributed.launch --nproc_per_node=4 \
-  sur_gbsa/pretrain_distributed.py \
-  --dataset md-dock_top_5+crystal \
-  --data_path ./data/md \
-  --split_path ./data/splits \
-  --batch_size 256 \
-  --lr 1e-4 \
-  --epochs 100
+# Launch with desired number of GPUs
+python -m torch.distributed.launch --nproc_per_node=N_GPUS script.py [args]
 ```
+
+**Important**: The paper results use distributed training scripts. Single-GPU versions are provided for convenience but were not used in the published work.
 
 ### Extract Learned Representations
 
