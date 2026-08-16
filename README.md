@@ -97,11 +97,43 @@ Our datasets (MD trajectories, MM-GBSA scores, and processed ML-ready files), pr
 
 ### Available Data
 
-- **MD Trajectories**: Protein-ligand MD simulations from PDBBind CoreSet
-- **MM-GBSA Scores**: Energy calculations for binding affinity prediction
-- **ML-Ready Files**: Preprocessed HDF5 files for direct model training
-- **Splits**: Train/validation/test splits for reproducibility
-- **Pre-trained Checkpoints**: Models pre-trained on MD data with self-supervised tasks
+The dataset is organized into the following directories:
+
+```
+SurGBSA-data/
+├── md/                          # Raw MD simulation data
+│   └── {pdb_id}/                # One directory per PDB structure
+│       └── p{N}/                # Pose directory (p0=crystal, p1-p5=docked)
+│           ├── com.prmtop       # AMBER topology file
+│           ├── com.nc           # NetCDF trajectory file
+│           └── frames.dat       # MM-GBSA scores per frame
+├── ml_data/                     # Pre-processed ML-ready numpy arrays
+│   └── {pdb_id}-{rep}-p{N}_prot-md-input.npy
+├── splits/                      # Train/val/test split definitions
+│   ├── coreMD-fold-0-train.csv
+│   ├── coreMD-fold-0-val.csv
+│   ├── coreMD-fold-0-test.csv
+│   ├── pdbid_list.csv          # Metadata for all structures
+│   └── pose_list.csv            # Pose information
+└── weights/                     # Pre-trained model checkpoints
+    └── best_model-epoch-{N}.pt
+```
+
+#### Data Contents
+
+- **MD Trajectories**: Protein-ligand MD simulations from PDBBind CoreSet with topology (`.prmtop`) and trajectory (`.nc`) files
+- **MM-GBSA Scores**: Frame-by-frame energy calculations in `frames.dat` files
+- **ML-Ready Files**: Preprocessed numpy arrays (`.npy`) for direct model training
+- **Splits**: Train/validation/test splits for reproducibility and cross-validation
+- **Pre-trained Checkpoints**: PyTorch model weights pre-trained on MD data with self-supervised tasks
+
+#### Data Format Details
+
+- **Topology files** (`.prmtop`): AMBER parameter/topology files
+- **Trajectory files** (`.nc`): NetCDF format trajectories readable with MDAnalysis
+- **MM-GBSA files** (`.frames.dat`): Text files with one score per MD frame
+- **ML arrays** (`.npy`): NumPy arrays with shape `(n_frames, n_atoms, features)`
+- **Model checkpoints** (`.pt`): PyTorch state dicts with model weights and training args
 
 ## Directory Structure
 
@@ -156,37 +188,98 @@ SurGBSA/
 
 ### 1. Download Data
 
-Download the preprocessed datasets from HuggingFace:
+Download the dataset from HuggingFace:
 
 ```bash
 # Install huggingface_hub if not already installed
 pip install huggingface_hub
 
-# Download the dataset (adjust path as needed)
+# Download the complete dataset (~90 GB)
 huggingface-cli download llnl/SurGBSA --repo-type dataset --local-dir ./data
+
+# Extract the MD trajectories
+cd ./data
+tar -xzf md.tar.gz
+
+# After extraction, your data directory will contain:
+# ./data/
+#   ├── md/          - Raw MD simulation trajectories for all systems
+#   ├── ml_data/     - Pre-processed ML-ready numpy arrays
+#   ├── splits/      - Train/val/test splits
+#   └── weights/     - Pre-trained model checkpoints
 ```
 
-### 2. Pretraining (Optional)
+**Directory structure:**
+```
+data/
+├── md/                          # Raw MD simulation data
+│   └── {pdb_id}/                # One directory per PDB structure (e.g., 1a30)
+│       └── p{N}/                # Pose directory (p0=crystal, p1-p5=docked)
+│           ├── com.prmtop       # AMBER topology file
+│           ├── com.nc           # NetCDF trajectory file
+│           └── frames.dat       # MM-GBSA scores per frame
+├── ml_data/                     # Pre-processed numpy arrays
+│   └── {pdb_id}-{rep}-p{N}_prot-md-input.npy
+├── splits/                      # Train/val/test split definitions
+│   ├── coreMD-fold-0-train.csv
+│   ├── coreMD-fold-0-val.csv
+│   ├── coreMD-fold-0-test.csv
+│   ├── pdbid_list.csv
+│   └── pose_list.csv
+└── weights/                     # Pre-trained model checkpoints
+    └── best_model-epoch-{N}.pt
+```
+
+### 2. Working with the MD Data
+
+The downloaded `md/` directory contains organized MD trajectories:
+
+```bash
+# Example: Explore the data structure
+ls ./data/md/                    # Lists all PDB IDs (e.g., 1a30, 1a42, ...)
+ls ./data/md/1a30/              # Lists pose directories (p0, p1, p2, ...)
+ls ./data/md/1a30/p0/           # Shows com.prmtop, com.nc, frames.dat
+
+# Load trajectory data with MDAnalysis (Python)
+import MDAnalysis as mda
+u = mda.Universe("./data/md/1a30/p0/com.prmtop", "./data/md/1a30/p0/com.nc")
+print(f"Number of atoms: {u.atoms.n_atoms}")
+print(f"Number of frames: {len(u.trajectory)}")
+
+# Load MM-GBSA scores
+import numpy as np
+gbsa_scores = np.loadtxt("./data/md/1a30/p0/frames.dat")
+```
+
+**Pose numbering:**
+- `p0` = Crystal structure pose
+- `p1-p5` = Docked poses (ranked by docking score)
+
+### 3. Pretraining (Optional)
 
 Pre-train a model on MD trajectories with self-supervised tasks:
 
 ```bash
 python sur_gbsa/pretrain.py \
   --dataset md-dock_top_5+crystal \
+  --data_path ./data/md \
+  --split_path ./data/splits \
   --batch_size 128 \
   --lr 1e-4 \
   --epochs 100 \
   --pretrain_tasks order,rmsd,pose
 ```
 
-### 3. Fine-tuning
+### 4. Fine-tuning
 
-Fine-tune on binding affinity prediction (e.g., PDBBind with ATOM3D splits):
+Fine-tune on binding affinity prediction using the pre-trained checkpoint:
 
 ```bash
 python sur_gbsa/finetune_affinity.py \
-  --pretrain ./checkpoints/pretrained_model.pt \
-  --dataset pdbbind-30 \
+  --pretrain ./data/weights/best_model-epoch-574.pt \
+  --dataset md-crystal \
+  --data_path ./data/md \
+  --split_path ./data/splits \
   --save_path ./results/finetuned_model \
   --lr 1e-4 \
   --batch_size 64 \
@@ -194,51 +287,56 @@ python sur_gbsa/finetune_affinity.py \
   --seed 0
 ```
 
-### 4. Inference on Custom Structures
+### 5. Inference on Structures
 
-Run inference on your own protein-ligand structures using MDAnalysis-compatible formats:
+Run inference using the pre-trained model on MD trajectories or custom structures:
 
 ```bash
-# Score a single PDB file
+# Score an MD trajectory from the downloaded data
 python sur_gbsa/score_mdanalysis.py \
-  --ckpt ./checkpoints/finetuned_model.pt \
+  --ckpt ./data/weights/best_model-epoch-574.pt \
+  --topology-path ./data/md/1a30/p0/com.prmtop \
+  --trajectory-path ./data/md/1a30/p0/com.nc \
+  --output predictions.csv \
+  --frame-stride 10
+
+# Score your own custom PDB file
+python sur_gbsa/score_mdanalysis.py \
+  --ckpt ./data/weights/best_model-epoch-574.pt \
   --input-paths protein_ligand.pdb \
   --output predictions.csv
 
-# Score multiple structures
+# Score multiple custom structures
 python sur_gbsa/score_mdanalysis.py \
-  --ckpt ./checkpoints/finetuned_model.pt \
+  --ckpt ./data/weights/best_model-epoch-574.pt \
   --input-paths structure1.pdb structure2.cif structure3.pdb \
-  --output predictions.csv
-
-# Score an MD trajectory
-python sur_gbsa/score_mdanalysis.py \
-  --ckpt ./checkpoints/finetuned_model.pt \
-  --topology-path protein.prmtop \
-  --trajectory-path trajectory.nc \
-  --output trajectory_scores.csv
+  --output batch_predictions.csv
 ```
 
-### 5. Evaluation
+### 6. Evaluation
 
 Evaluate a trained model on test set:
 
 ```bash
+# Evaluate using downloaded splits
 python sur_gbsa/test.py \
-  --checkpoint ./results/finetuned_model/best_model.pt \
-  --dataset pdbbind-30 \
-  --split test
+  --checkpoint ./data/weights/best_model-epoch-574.pt \
+  --dataset md-crystal \
+  --data_path ./data/md \
+  --split_path ./data/splits/coreMD-fold-0-test.csv
 ```
 
 ## Usage Examples
 
 ### Training from Scratch
 
-Train a model without pretraining:
+Train a model without pretraining using the downloaded data:
 
 ```bash
 python sur_gbsa/finetune_affinity.py \
-  --dataset pdbbind-30 \
+  --dataset md-crystal \
+  --data_path ./data/md \
+  --split_path ./data/splits \
   --save_path ./results/from_scratch \
   --lr 1e-4 \
   --batch_size 64 \
@@ -248,7 +346,7 @@ python sur_gbsa/finetune_affinity.py \
 
 ### Distributed Training (Multi-GPU)
 
-For multi-GPU training using PyTorch DDP:
+For multi-GPU training using PyTorch DDP with the downloaded data:
 
 ```bash
 # Set environment variables
@@ -259,6 +357,8 @@ export MASTER_PORT=29500
 python -m torch.distributed.launch --nproc_per_node=4 \
   sur_gbsa/pretrain_distributed.py \
   --dataset md-dock_top_5+crystal \
+  --data_path ./data/md \
+  --split_path ./data/splits \
   --batch_size 256 \
   --lr 1e-4 \
   --epochs 100
@@ -270,9 +370,11 @@ Extract embeddings from a trained model:
 
 ```bash
 python sur_gbsa/extract.py \
-  --checkpoint ./results/finetuned_model/best_model.pt \
-  --dataset pdbbind-30 \
-  --output ./embeddings/pdbbind_embeddings.pt
+  --checkpoint ./data/weights/best_model-epoch-574.pt \
+  --dataset md-crystal \
+  --data_path ./data/md \
+  --split_path ./data/splits/coreMD-fold-0-test.csv \
+  --output ./embeddings/embeddings.pt
 ```
 
 ### Pose Ranking
@@ -296,7 +398,7 @@ Score a single protein-ligand complex:
 
 ```bash
 python sur_gbsa/score_mdanalysis.py \
-  --ckpt ./checkpoints/model.pt \
+  --ckpt ./data/weights/best_model-epoch-574.pt \
   --input-paths complex.pdb \
   --output predictions.csv
 ```
@@ -307,7 +409,7 @@ Score multiple structures in batch:
 
 ```bash
 python sur_gbsa/score_mdanalysis.py \
-  --ckpt ./checkpoints/model.pt \
+  --ckpt ./data/weights/best_model-epoch-574.pt \
   --input-paths structure1.pdb structure2.cif structure3.mmcif \
   --output batch_predictions.csv \
   --batch-size 16
@@ -315,14 +417,15 @@ python sur_gbsa/score_mdanalysis.py \
 
 #### MD Trajectory Analysis
 
-Score all frames in an MD trajectory:
+Score all frames in an MD trajectory from the downloaded data:
 
 ```bash
+# Example: Score the 1a30 crystal pose (p0) trajectory
 python sur_gbsa/score_mdanalysis.py \
-  --ckpt ./checkpoints/model.pt \
-  --topology-path system.prmtop \
-  --trajectory-path trajectory.nc \
-  --output trajectory_scores.csv \
+  --ckpt ./data/weights/best_model-epoch-574.pt \
+  --topology-path ./data/md/1a30/p0/com.prmtop \
+  --trajectory-path ./data/md/1a30/p0/com.nc \
+  --output 1a30_trajectory_scores.csv \
   --frame-stride 10 \
   --max-frames 100
 ```
@@ -333,7 +436,7 @@ Customize ligand detection and pocket definition:
 
 ```bash
 python sur_gbsa/score_mdanalysis.py \
-  --ckpt ./checkpoints/model.pt \
+  --ckpt ./data/weights/best_model-epoch-574.pt \
   --input-paths complex.pdb \
   --output predictions.csv \
   --ligand-selection "resname LIG" \
