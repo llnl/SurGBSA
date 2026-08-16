@@ -148,9 +148,9 @@ SurGBSA/
 │   │
 │   ├── pretrain.py               # Single-GPU pretraining script
 │   ├── pretrain_distributed.py   # Multi-GPU distributed pretraining
-│   ├── finetune_affinity.py      # Finetune for binding affinity prediction
+│   ├── finetune_affinity.py      # Finetune for binding affinity/MM-GBSA prediction
+│   ├── finetune_decoy_pose_ranking.py  # Finetune for CASF-2016 decoy pose ranking
 │   ├── finetune_distributed-egnn.py  # Distributed finetuning for EGNN
-│   ├── finetune_pose_ranking.py  # Finetune for pose ranking
 │   ├── test.py                   # Model evaluation script
 │   ├── extract.py                # Extract embeddings from checkpoints
 │   ├── sample.py                 # Sample trajectories from model
@@ -272,19 +272,35 @@ python sur_gbsa/pretrain.py \
 
 ### 4. Fine-tuning
 
-Fine-tune on binding affinity prediction using the pre-trained checkpoint:
+Fine-tune on binding affinity or pose ranking tasks:
 
+**Binding Affinity Prediction:**
 ```bash
 python sur_gbsa/finetune_affinity.py \
   --pretrain ./data/weights/best_model-epoch-574.pt \
   --dataset md-crystal \
-  --data_path ./data/md \
-  --split_path ./data/splits \
-  --save_path ./results/finetuned_model \
+  --data-dir ./data/md \
+  --train-split ./data/splits/coreMD-fold-0-train.csv \
+  --val-split ./data/splits/coreMD-fold-0-val.csv \
+  --test-split ./data/splits/coreMD-fold-0-test.csv \
+  --save_path ./results/affinity_model \
   --lr 1e-4 \
   --batch_size 64 \
-  --epochs 500 \
-  --seed 0
+  --epochs 500
+```
+
+**Pose Ranking (CASF-2016):**
+```bash
+python sur_gbsa/finetune_decoy_pose_ranking.py \
+  --pretrain ./data/weights/best_model-epoch-574.pt \
+  --train-split ./casf_splits/train_pdbs.txt \
+  --val-split ./casf_splits/val_pdbs.txt \
+  --test-split ./casf_splits/test_pdbs.txt \
+  --casf-root /path/to/CASF-2016 \
+  --save-path ./results/pose_ranking \
+  --batch-size 32 \
+  --lr 1e-4 \
+  --epochs 50
 ```
 
 ### 5. Inference on Structures
@@ -328,21 +344,79 @@ python sur_gbsa/test.py \
 
 ## Usage Examples
 
-### Training from Scratch
+### Fine-tuning for Binding Affinity Prediction
 
-Train a model without pretraining using the downloaded data:
+Fine-tune a model for binding affinity or MM-GBSA prediction using `finetune_affinity.py`:
 
 ```bash
+# Fine-tune from pretrained checkpoint
+python sur_gbsa/finetune_affinity.py \
+  --pretrain ./data/weights/best_model-epoch-574.pt \
+  --dataset md-crystal \
+  --data-dir ./data/md \
+  --train-split ./data/splits/coreMD-fold-0-train.csv \
+  --val-split ./data/splits/coreMD-fold-0-val.csv \
+  --test-split ./data/splits/coreMD-fold-0-test.csv \
+  --save_path ./results/affinity_model \
+  --lr 1e-4 \
+  --batch_size 64 \
+  --epochs 500 \
+  --seed 0
+
+# Train from scratch (no pretraining)
 python sur_gbsa/finetune_affinity.py \
   --dataset md-crystal \
-  --data_path ./data/md \
-  --split_path ./data/splits \
+  --data-dir ./data/md \
+  --train-split ./data/splits/coreMD-fold-0-train.csv \
+  --val-split ./data/splits/coreMD-fold-0-val.csv \
+  --test-split ./data/splits/coreMD-fold-0-test.csv \
   --save_path ./results/from_scratch \
   --lr 1e-4 \
   --batch_size 64 \
   --epochs 500 \
   --seed 0
 ```
+
+**Key Parameters:**
+- `--pretrain`: Path to pretrained checkpoint (optional, trains from scratch if not provided)
+- `--dataset`: Dataset type (e.g., `md-crystal`, `md-dock_top_5`, `pdbbind-30`)
+- `--data-dir`: Path to directory containing MD trajectories
+- `--train-split/--val-split/--test-split`: Paths to CSV files defining splits
+- `--use_residue_features`: Enable residue-level features (advanced)
+- `--linear_probe`: Freeze encoder and only train the regression head
+
+### Fine-tuning for Pose Ranking (CASF-2016)
+
+Fine-tune a model for the CASF-2016 decoy pose ranking task using `finetune_decoy_pose_ranking.py`:
+
+```bash
+python sur_gbsa/finetune_decoy_pose_ranking.py \
+  --pretrain ./data/weights/best_model-epoch-574.pt \
+  --train-split ./data/casf_splits/train_pdbs.txt \
+  --val-split ./data/casf_splits/val_pdbs.txt \
+  --test-split ./data/casf_splits/test_pdbs.txt \
+  --casf-root /path/to/CASF-2016 \
+  --save-path ./results/pose_ranking \
+  --batch-size 32 \
+  --lr 1e-4 \
+  --epochs 50 \
+  --ranking-margin 1.5 \
+  --ranking-weight 0.5 \
+  --seed 42
+```
+
+**Key Parameters:**
+- `--pretrain`: Path to pretrained checkpoint
+- `--casf-root`: Path to CASF-2016 dataset directory
+- `--train-split/--val-split/--test-split`: Text files with PDB IDs (one per line)
+- `--ranking-margin`: Margin for pairwise ranking loss (default: 1.5)
+- `--ranking-weight`: Weight balancing ranking loss vs MSE loss (default: 0.5)
+- `--linear-probe`: Only train regression head, freeze encoder
+- `--use-residue-features`: Enable residue-level features
+
+**Metrics computed:**
+- Success rate (Top-1): % of complexes where best-scored pose has RMSD ≤ 2.0 Å
+- Mean Spearman correlation: Average correlation between predicted scores and true RMSDs
 
 ### Distributed Training (Multi-GPU)
 
