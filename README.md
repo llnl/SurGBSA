@@ -150,7 +150,7 @@ SurGBSA/
 │   ├── pretrain.py               # Single-GPU pretraining script (not used in paper)
 │   ├── pretrain_distributed.py   # Multi-GPU distributed pretraining (main pretraining)
 │   ├── finetune_distributed.py   # Distributed MM-GBSA training for EGMN models
-│   ├── finetune_distributed-egnn.py  # Distributed MM-GBSA training for GNN/EGNN models
+│   ├── finetune_distributed_egnn.py  # Distributed MM-GBSA training for GNN/EGNN models
 │   ├── finetune_affinity.py      # Finetune for binding affinity prediction
 │   ├── finetune_decoy_pose_ranking.py  # Finetune for CASF-2016 decoy pose ranking
 │   ├── test.py                   # Model evaluation script
@@ -301,7 +301,7 @@ python -m torch.distributed.launch --nproc_per_node=4 \
 **For GNN/EGNN models:**
 ```bash
 python -m torch.distributed.launch --nproc_per_node=4 \
-  sur_gbsa/finetune_distributed-egnn.py \
+  sur_gbsa/finetune_distributed_egnn.py \
   --dataset md-dock_top_5+crystal \
   --data_path ./data/md \
   --split_path ./data/splits \
@@ -414,7 +414,7 @@ python -m torch.distributed.launch --nproc_per_node=4 \
 ```bash
 # Train GNN/EGNN for MM-GBSA prediction
 python -m torch.distributed.launch --nproc_per_node=4 \
-  sur_gbsa/finetune_distributed-egnn.py \
+  sur_gbsa/finetune_distributed_egnn.py \
   --dataset md-dock_top_5+crystal \
   --data_path ./data/md \
   --split_path ./data/splits \
@@ -508,7 +508,7 @@ python sur_gbsa/finetune_decoy_pose_ranking.py \
 
 ### Distributed Training Notes
 
-All main training scripts (`pretrain_distributed.py`, `finetune_distributed.py`, `finetune_distributed-egnn.py`) use PyTorch DDP for multi-GPU training:
+All main training scripts (`pretrain_distributed.py`, `finetune_distributed.py`, `finetune_distributed_egnn.py`) use PyTorch DDP for multi-GPU training:
 
 ```bash
 # Set required environment variables
