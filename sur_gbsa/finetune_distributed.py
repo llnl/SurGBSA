@@ -135,7 +135,7 @@ def init_distributed():
         rank = int(os.environ["RANK"])
         world_size = int(os.environ["WORLD_SIZE"])
         local_rank = int(os.environ["LOCAL_RANK"])
-        device = local_rank
+        device = torch.device(f"cuda:{local_rank}")
         torch.cuda.set_device(device)
         print(f"[Rank {rank}] Initializing process group with NCCL backend, device={device}...")
         dist.init_process_group(
@@ -150,7 +150,7 @@ def init_distributed():
         world_size = int(os.environ["FLUX_JOB_SIZE"])
         rank = int(os.environ["FLUX_TASK_RANK"])
         local_rank = int(rank % gpus_per_node)
-        device = local_rank
+        device = torch.device(f"cuda:{local_rank}")
         torch.cuda.set_device(device)
         dist.init_process_group(
             backend="nccl",
@@ -164,7 +164,7 @@ def init_distributed():
         world_size = int(os.environ["SLURM_NTASKS"])
         rank = int(os.environ["SLURM_PROCID"])
         local_rank = int(rank % gpus_per_node)
-        device = local_rank
+        device = torch.device(f"cuda:{local_rank}")
         torch.cuda.set_device(device)
         dist.init_process_group(
             backend="nccl",
@@ -176,7 +176,16 @@ def init_distributed():
     else:
         # Single GPU mode - no distributed training
         print(f"Running in single GPU mode (no distributed training detected)")
-        torch.cuda.set_device(device)
+        if torch.cuda.is_available():
+            device = torch.device("cuda:0")
+            torch.cuda.set_device(device)
+        elif torch.backends.mps.is_available():
+            
+            device = torch.device("mps")
+            print(f"Metal Performance Shaders (MPS) enabled.")
+        else:
+            device = torch.device("cpu")
+            print("No GPU detected, running on CPU.")
 
     return rank, world_size, local_rank, device
 
@@ -330,7 +339,7 @@ def main():
     if pretrain_exists:
         if rank == 0:
             log.logger.info(f"Loading pretrained weights from {pretrain_path}")
-        checkpoint = torch.load(pretrain_path, map_location=f"cuda:{device}", weights_only=False)
+        checkpoint = torch.load(pretrain_path, map_location=f"{device}", weights_only=False)
 
     ckpt_args = normalize_checkpoint_args(checkpoint.get("args", None) if checkpoint is not None else None)
     if ckpt_args is None:
