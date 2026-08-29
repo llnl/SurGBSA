@@ -1,3 +1,11 @@
+################################################################################
+# Copyright (c) 2021-2026, Lawrence Livermore National Security, LLC.
+# Produced at the Lawrence Livermore National Laboratory.
+# Written by D. Jones <djones@llnl.gov> and UCSD collaborators in listed in CONTRIBUTING.md
+#
+# All rights reserved.
+################################################################################
+
 """
 Fine-tune pretrained models on CASF-2016 pose ranking task.
 """
