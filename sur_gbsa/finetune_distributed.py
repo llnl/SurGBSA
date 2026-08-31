@@ -122,10 +122,18 @@ def build_run_name(args, pretrain_path):
     return run_name, run_hash
 
 
-def init_distributed():
+def init_distributed(cpu_only=False):
     rank = 0
     world_size = 1
     local_rank = 0
+
+
+    if cpu_only:
+        device = torch.device("cpu")
+        print("CPU-only mode enabled. CUDA and MPS are disabled.")
+        return rank, world_size, local_rank, device
+
+
     device = 0
     gpus_per_node = max(1, torch.cuda.device_count())
     timeout = timedelta(minutes=60)
@@ -195,6 +203,11 @@ def parse_args():
 
     p = argparse.ArgumentParser()
     p.add_argument("--config", type=str, default=None)
+    p.add_argument(
+        "--cpu-only",
+        action="store_true",
+        help="Disable CUDA and MPS, forcing CPU execution",
+    )
 
     p.add_argument("--dataset", choices=dataset_list, default="gbsa")
     p.add_argument("--objective", type=str, default="mmgbsa")
@@ -282,9 +295,10 @@ def load_pretrained_weights(module, checkpoint, rank=0):
 
 
 def main():
-    rank, world_size, local_rank, device = init_distributed()
-    args = parse_args()
-    args = merge_args(args, load_json_config(args.config))
+    cli_args = parse_args()
+    config = load_json_config(cli_args.config)
+    args = merge_args(cli_args, config)
+    rank, world_size, local_rank, device = init_distributed(args.cpu_only)
     validate_config(args)
 
     if not getattr(args, "train_objectives", ""):
@@ -372,7 +386,8 @@ def main():
 
     criterion = torch.nn.MSELoss()
     optimizer = opt.AdamW(model.parameters(), lr=args.lr / max(1, world_size), weight_decay=args.weight_decay)
-    scaler = torch.amp.GradScaler("cuda", enabled=True)
+    # scaler = torch.amp.GradScaler("cuda", enabled=True)
+    scaler = torch.amp.GradScaler(device, enabled=True)
 
     datasets = get_train_val_test_datasets(ckpt_args)
     train_dataset = datasets["train"]
